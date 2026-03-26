@@ -1,0 +1,2 @@
+datasets/*.parquet filter=lfs diff=lfs merge=lfs -text
+src/*.bin filter=lfs diff=lfs merge=lfs -text
