@@ -6,12 +6,14 @@ import pandas
 import pyarrow
 import pyarrow.parquet as pq
 import fasttext
+import os
 
 # Useful Constants
 schema = ["user", "id", "tweet", "replies", "likes", "quotes", "date"]
 URL = "/home/adam/.cache/huggingface/hub/datasets--enryu43--twitter100m_tweets/snapshots/5d742bec6f777adf262006017cd3b67e985b0874/data"
+OUTPUT_DIR = "/home/adam/programming/class/767_information_retrieval/course-project-materials/datasets"
 
-def classify_pq_file(filename, model):
+def classify_pq_file(filename, output_location, file_num, model):
     """This function will classify every tweet in a given .parquet file and write it to a new file
     """
     # First load the dataset
@@ -43,11 +45,16 @@ def classify_pq_file(filename, model):
 
     table["lang"] = results
     output = pyarrow.Table.from_pandas(table)
-    pq.write_table(output, "dataset-1.parquet")
+    pq.write_table(output, f"{OUTPUT_DIR}/dataset-{file_num}.parquet")
     print("Parquet file written successfully!")
-    
+
+
 if __name__ =="__main__":
     # Load the model, it makes sense to use the same one for each
-    model_inst = fasttext.load_model("lid.176.bin")
+    model_inst = fasttext.load_model("../../lid.176.bin")
 
-    classify_pq_file("/train-00000-of-00041-3f49db2da17edd5a.parquet", model_inst)
+    files = os.listdir(URL)
+    files = sorted(files)
+    for num, file in enumerate(files):
+        print(f"--- {file} ---")
+        classify_pq_file(file, OUTPUT_DIR, num, model_inst)
