@@ -1,101 +1,65 @@
-# Imports:
-#   Pandas is needed as the base library for handling data
-#   pyarrow is the engine that reads the parquet file
-#   tranformers is a generic interface to work off
 import os
 import pandas
 import pyarrow
 import pyarrow.parquet as pq
+import torch
 from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-from dotenv import load_dotenv
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
-load_dotenv()
-os.environ['HUGGINGFACEHUB_API_TOKEN'] = os.getenv("HUGGINGFACE_API_TOKEN")
+#MODEL_NAME = "cardiffnlp/twitter-roberta-base-sentiment"
+MODEL_NAME  = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+DATA_FILE   = "/home/a130b319/a130b319/datasets/subsample_dataset.parquet"
+OUTPUT_FILE = "/home/a130b319/a130b319/out.parquet"
 
-
-MODEL_NAME = "cardiffnlp/twitter-roberta-base-sentiment"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
-
-
-# Useful Constants
-URL ="/home/adam/programming/class/767_information_retrieval/course-project-materials/datasets"
-OUTPUT_DIR = "/home/adam/programming/class/767_information_retrieval/course-project-materials/output"
-
-def classify_pq_file(filename, output_location, Classifier):
-    """This function will classify every tweet in a given .parquet file and write it to a new file
-    """
-    # First load the dataset
-    table = pandas.read_parquet(f"{URL}/{filename}", engine="pyarrow")
-    print(table)
-    tweets = (
-        table["tweet"]
-        .fillna("")                         # remove NaN
-        .astype(str)                        # ensure string
-        .str.replace(r"[\r\n]+", " ", regex=True)  # remove newlines
-        .str.replace(r"http\S+", "", regex=True) # Remove Links
-        .str.replace(r"@\S+", "", regex=True) # Remove usernames
+def clean_tweets(series):
+    return (
+        series
+        .fillna("").astype(str)
+        .str.replace(r"[\r\n]+", " ", regex=True)
+        .str.replace(r"http\S+",  "", regex=True)
+        .str.replace(r"@\S+",     "", regex=True)
+        .tolist()
     )
 
-    batch_size = 1000
+if __name__ == "__main__":
+    device     = 0 if torch.cuda.is_available() else -1
+    batch_size = 1024 if device == 0 else 32
+    logging.info(f"Device: {'GPU' if device == 0 else 'CPU'}  |  Batch size: {batch_size}")
+
+    tokenizer  = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model      = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+    classifier = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer, device=device)
+
+    table  = pandas.read_parquet(DATA_FILE, engine="pyarrow")
+    tweets = clean_tweets(table["tweet"])
+    logging.info(f"Loaded {len(tweets):,} tweets")
+
     results = []
-
-    batch_n = 0
-    file_n = 0
-    # with a batch size of 1k this means
-    checkpointing = 68
+    checkpoint_interval = 100000
+    next_checkpoint = checkpoint_interval
+ 
     for i in range(0, len(tweets), batch_size):
-        print(f"WORKING: {i} - {i+batch_size}")
-        if batch_n == checkpointing:
-            batch_n = 0
-            file_n += 1
-            sent_df = pandas.DataFrame(results)
-            # Merge the two lists, the things on table.iloc(... are just for safeguarding
-            output_df = pandas.concat(
-                [
-                    table.iloc[:len(sent_df)].reset_index(drop=True),
-                    sent_df
-                ],
-                axis=1)
+        batch = tweets[i : i + batch_size]
+        results.extend(classifier(batch, truncation=True, max_length=512))
+        if i % 10240 == 0:
+            logging.info(f"  {i:,} / {len(tweets):,}")
 
-            # output to parquet
-            output = pyarrow.Table.from_pandas(output_df)
-            pq.write_table(output, f"{output_location}/dataset-classified-{file_n}.parquet")
-            print("Parquet file written successfully!")
-            results = []
+        # write checkpoint
+        if len(results) >= next_checkpoint:
+            checkpoint_df = pandas.concat(
+                [table.iloc[:len(results)].reset_index(drop=True), pandas.DataFrame(results)],
+                axis=1
+            )
+            pq.write_table(pyarrow.Table.from_pandas(checkpoint_df), OUTPUT_FILE + ".checkpoint")
 
+            next_checkpoint += checkpoint_interval
 
-        # Extract a set of 1000 tweets
-        batch = tweets.iloc[i:i+batch_size].tolist()
-
-        # Classify the tweets
-        sentiment = Classifier(batch)
-
-        results.extend(sentiment)
-        batch_n += 1
-
-
-    sent_df = pandas.DataFrame(results)
-    # Merge the two lists, the things on table.iloc(... are just for safeguarding
     output_df = pandas.concat(
-        [
-            table.iloc[:len(sent_df)].reset_index(drop=True),
-            sent_df
-        ],
-        axis=1)
+        [table.reset_index(drop=True), pandas.DataFrame(results)],
+        axis=1
+    )
+    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+    pq.write_table(pyarrow.Table.from_pandas(output_df), OUTPUT_FILE)
+    logging.info(f"Done. Written to {OUTPUT_FILE}")
 
-    # output to parquet
-    output = pyarrow.Table.from_pandas(output_df)
-    pq.write_table(output, f"{output_location}/dataset-classified.parquet")
-    print("Parquet file written successfully!")
-
-
-if __name__ =="__main__":
-    # Load the model, it makes sense to use the same one for each
-    classifier = pipeline('sentiment-analysis', model=model, tokenizer=tokenizer)
-
-    files = os.listdir(URL)
-    files = sorted(files)
-    for num, file in enumerate(files):
-        print(f"--- {file} ---")
-        classify_pq_file(file, OUTPUT_DIR, classifier)
