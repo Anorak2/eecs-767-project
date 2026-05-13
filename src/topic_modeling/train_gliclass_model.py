@@ -43,6 +43,7 @@ if __name__ =="__main__":
     max_length = 1024
     problem_type = "multi_label_classification"
 
+    # training arguments for our fine-tuning
     training_args = TrainingArguments(
         output_dir='models/test',
         learning_rate=1e-5,
@@ -57,7 +58,7 @@ if __name__ =="__main__":
         eval_strategy="epoch",
         save_steps = 1000,
         save_total_limit=10,
-        dataloader_num_workers=0, #change back to 8
+        dataloader_num_workers=8,
         logging_steps=10,
         use_cpu = False,
         report_to="none",
