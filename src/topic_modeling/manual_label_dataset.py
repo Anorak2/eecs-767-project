@@ -11,10 +11,13 @@ import gzip
 import torch
 import json
 
+# input is the complete subsampled dataset
 dataset_file = "D:/Documents/EECS_767/subsample_dataset.parquet.gzip"
 dataset = ds.dataset(dataset_file, format="parquet")
 dataset_table = dataset.to_table()
 df = dataset_table.to_pandas()
+
+# sampling 4 tweets from each month-year pair
 sample_df = df.groupby('year_month_pairs').sample(4, random_state=42)
 sample_df['id'] = sample_df['id'].astype(str)
 export_df = sample_df[['id', 'tweet']]
