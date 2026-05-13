@@ -16,12 +16,18 @@ import numpy
 import gzip
 
 if __name__ =="__main__":
+
+    # our model fine-tuning uses the v1 model of GLiClass, and our annotated data subsample
     df = pd.read_excel("sample_dataset_labels.xlsx", sheet_name="sample_dataset_labels")
     labels = ["sports", "movies/tv shows", "art/design", "video games", "books/literature", "politics", "technology", "science", "business", "lifestyle", "music", "travel", "social/general/other"]
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = GLiClassModel.from_pretrained("knowledgator/gliclass-base-v1.0").to(device)
     tokenizer = AutoTokenizer.from_pretrained("knowledgator/gliclass-base-v1.0")
 
+    # each row of the annotated data needs to be converted into a specific format specified by GLiClass:
+    # - the text of the actual tweet
+    # - the list of all possible labels
+    # - our actual manually assigned labels from our annotations
     train_data = []
     for index, row in df.iterrows():
         label_list = [label for label in labels if row[label] == 1]
@@ -33,6 +39,7 @@ if __name__ =="__main__":
     print(train_data[0])
     print("num examples:", len(train_data))
 
+    # fine-tuning of the model according to GLiClass tutorial: https://huggingface.co/blog/Ihor/refreshing-zero-shot-classification#how-to-fine-tune 
     max_length = 1024
     problem_type = "multi_label_classification"
 
@@ -92,5 +99,7 @@ if __name__ =="__main__":
         data_collator=data_collator,
     )
     trainer.train()
+
+    # saving fine-tuned model as a pretrained model for use later
     model.save_pretrained("./gliclass_finetuned_EECS767")
     tokenizer.save_pretrained("./gliclass_finetuned_EECS767")
